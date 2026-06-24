@@ -1,0 +1,13 @@
+# Smaller reference eval for a strong model.
+# Kept smaller because GPT-5.5 is much more expensive than Qwen.
+
+[[eval]]
+env_id = "davidfromkansas/calendar-agent"
+model = "openai/gpt-5.5"
+provider = "prime"
+num_examples = 20
+rollouts_per_example = 1
+max_tokens = 2048
+temperature = 0.2
+state_columns = ["submitted_choice", "submitted_result"]
+env_args = { difficulty = "easy", num_examples = 20, seed = 20000, max_turns = 10 }

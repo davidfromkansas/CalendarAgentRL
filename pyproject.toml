@@ -1,0 +1,9 @@
+[project]
+name = "calendaragentrl"
+version = "0.1.0"
+description = "A Prime/Verifiers RL environment for synthetic calendar scheduling agents"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "verifiers>=0.1.14",
+]

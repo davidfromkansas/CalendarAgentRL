@@ -1,0 +1,23 @@
+[project]
+name = "calendar-agent"
+description = "A tool-use environment for scheduling meetings across busy calendars, constraints, rooms, and time zones."
+tags = ["calendar", "tool-use", "scheduling", "train", "eval"]
+version = "0.1.3"
+requires-python = ">=3.10"
+dependencies = [
+    "verifiers>=0.1.14",
+    "datasets>=4.0.0",
+    "rich>=13.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["calendar_agent.py", "calendar_tui.py", "test_calendar_agent.py", "README.md", "PLAN.md", "pyproject.toml"]
+
+[tool.verifiers.eval]
+num_examples = 5
+rollouts_per_example = 1
+max_tokens = 4096

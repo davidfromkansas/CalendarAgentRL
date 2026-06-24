@@ -1,0 +1,61 @@
+name = "calendar-agent-qwen-35b"
+model = "Qwen/Qwen3.5-35B-A3B"
+loss = "rl"
+max_steps = 100
+
+batch_size = 128
+rollouts_per_example = 8
+max_inflight_rollouts = 128
+
+[sampling]
+max_tokens = 4096
+temperature = 0.7
+enable_thinking = false
+
+[[env]]
+id = "davidfromkansas/calendar-agent"
+name = "calendar-agent-medium-train"
+args = { difficulty = "medium", num_examples = 256, seed = 101, max_turns = 14 }
+max_retries = 1
+
+[eval]
+interval = 20
+num_examples = 24
+rollouts_per_example = 1
+skip_first_step = false
+
+[eval.sampling]
+max_tokens = 4096
+temperature = 0.2
+enable_thinking = false
+
+[[eval.env]]
+id = "davidfromkansas/calendar-agent"
+name = "calendar-agent-easy-eval"
+args = { difficulty = "easy", num_examples = 24, seed = 1001, max_turns = 12 }
+num_examples = 24
+rollouts_per_example = 1
+
+[[eval.env]]
+id = "davidfromkansas/calendar-agent"
+name = "calendar-agent-medium-eval"
+args = { difficulty = "medium", num_examples = 24, seed = 2001, max_turns = 14 }
+num_examples = 24
+rollouts_per_example = 1
+
+[val]
+num_examples = 64
+rollouts_per_example = 1
+interval = 10
+
+[[pre_batch_filters]]
+type = "zero_advantage"
+enforce = true
+
+[checkpoints]
+interval = 20
+keep_cloud = 5
+
+[adapters]
+interval = 20
+keep_last = 3
