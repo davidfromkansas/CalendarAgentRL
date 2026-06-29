@@ -9,7 +9,7 @@ The goal is to train models to behave like practical scheduling agents: inspect 
 Each task asks an agent to schedule one meeting. The visible prompt includes the public setup:
 
 - meeting duration
-- allowed day range
+- allowed calendar-day range inside a month
 - allowed UTC working hours
 - required attendees
 - optional attendees
@@ -80,7 +80,7 @@ The environment still records raw utility as `calendar_reward` so you can inspec
 
 ## Deterministic Generation And Oracle Validation
 
-Tasks are generated programmatically from a seed. For each generated task, the environment enumerates all candidate choices:
+Tasks are generated programmatically from a seed. Each task samples a visible calendar-day window within a 31-day month, such as days `8-10` or `24-27`, instead of always using relative days `0-2`. For each generated task, the environment enumerates all candidate choices:
 
 - days
 - 30-minute start times
@@ -97,6 +97,8 @@ different seed -> different task
 ```
 
 Attendee names and room order are sampled deterministically per task. This prevents every example from looking like the same group of people and avoids tie-breaking all optimal room choices toward the first room name.
+
+For final generalization testing, the environment also supports a `generalization` generation profile with a heldout pool of attendee names, room names, and time zones. This keeps the scheduling rules the same while changing the surface distribution the model sees.
 
 ## Difficulty Levels
 
@@ -116,6 +118,34 @@ Difficulty controls ranges for:
 - target valid-solution ratio
 - minimum accepted oracle score
 - default max turns
+
+## Splits, Prompt Variants, And Slice Metrics
+
+`load_environment()` supports named split presets so training, dev, and final eval tasks can be kept separate:
+
+| Split preset | Purpose |
+| --- | --- |
+| `train_easy` / `train_medium` | Training-only seeds. |
+| `dev_easy` / `dev_medium` | Repeated debugging and recipe-selection evals. |
+| `heldout_easy` / `heldout_medium` | Final standard-distribution evals. |
+| `heldout_generalization` | Final generalization eval with heldout names, rooms, and time zones. |
+
+For robust evals, use `prompt_variant="mixed"`. The environment renders equivalent public task prompts in several deterministic styles, including a compact brief, a ticket format, and a stakeholder-style request. The hidden calendars and scoring are still generated entirely by code.
+
+Each task also exposes slice metadata in the dataset column `task_slices`, and the rubric reports task/context metrics such as:
+
+- `task_attendee_count`
+- `task_optional_count`
+- `task_room_count`
+- `task_valid_ratio`
+- `task_timezone_span_hours`
+- `slice_low_valid_density`
+- `slice_late_optimum`
+- `submitted_any`
+- `invalid_submission`
+- `exact_optimal`
+
+These make it possible to inspect where a trained model improves or lags instead of relying only on average reward.
 
 ## Repository Layout
 
@@ -177,11 +207,12 @@ uv run --project environments/calendar_agent python environments/calendar_agent/
 
 The project defines non-overlapping seed ranges so training progress is measured on fresh tasks:
 
-| Split | Difficulty | Seed range | Purpose |
+| Split preset | Difficulty | Seed range | Purpose |
 | --- | --- | --- | --- |
-| Train | easy | `10000-10127` | RL updates for the cheap 4B budget recipe |
-| Dev eval | easy | `20000-20099` | Repeated progress checks while tuning |
-| Heldout eval | easy | `30000-30099` | Final check after choosing a recipe |
+| `train_easy` | easy | `10000+` | RL updates for the cheap 4B budget recipe |
+| `dev_easy` | easy | `20000+` | Repeated progress checks while tuning |
+| `heldout_easy` | easy | `30000+` | Final check after choosing a recipe |
+| `heldout_generalization` | medium | `90000+` | Final generalization check after choosing a recipe |
 
 See [configs/rl/calendar-agent-splits.md](configs/rl/calendar-agent-splits.md).
 

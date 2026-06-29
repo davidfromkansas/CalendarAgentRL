@@ -1,5 +1,6 @@
-# Fixed dev eval for calendar-agent.
-# This must not overlap with RL training seeds.
+# Final generalization eval template.
+# This is the strongest final-exam set: new seed range plus heldout names, rooms, and time zones.
+# Do not use this repeatedly while tuning.
 
 [[eval]]
 env_id = "davidfromkansas/calendar-agent"
@@ -10,4 +11,4 @@ rollouts_per_example = 1
 max_tokens = 2048
 temperature = 0.2
 state_columns = ["task_slices", "prompt_variant", "generation_profile", "submitted_choice", "submitted_result"]
-env_args = { split = "dev_easy", num_examples = 100, max_turns = 10, prompt_variant = "mixed" }
+env_args = { split = "heldout_generalization", num_examples = 100, max_turns = 14, prompt_variant = "mixed" }

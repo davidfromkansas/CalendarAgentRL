@@ -14,6 +14,7 @@ from datasets import Dataset
 UTC_DAY_START = 9 * 60
 SLOT_MINUTES = 30
 ROOM_NAMES = ["Atlas", "Borealis", "Cascade"]
+GENERALIZATION_ROOM_NAMES = ["Juniper", "Kepler", "Mariner", "Solstice"]
 NAMES = [
     "Avery",
     "Blair",
@@ -41,6 +42,30 @@ NAMES = [
     "Yael",
     "Zion",
 ]
+GENERALIZATION_NAMES = [
+    "Amara",
+    "Bastian",
+    "Cleo",
+    "Daria",
+    "Eli",
+    "Farah",
+    "Galen",
+    "Hana",
+    "Ilya",
+    "Jules",
+    "Kiran",
+    "Leona",
+    "Mika",
+    "Noor",
+    "Oren",
+    "Priya",
+    "Rafi",
+    "Selah",
+    "Toma",
+    "Vera",
+    "Wes",
+    "Yara",
+]
 TIME_ZONES = {
     "Los Angeles": -7 * 60,
     "Denver": -6 * 60,
@@ -48,6 +73,25 @@ TIME_ZONES = {
     "New York": -4 * 60,
     "London": 60,
 }
+GENERALIZATION_TIME_ZONES = {
+    **TIME_ZONES,
+    "Toronto": -4 * 60,
+    "Berlin": 2 * 60,
+    "Lisbon": 60,
+    "Singapore": 8 * 60,
+}
+
+SPLIT_PRESETS = {
+    "train_easy": {"difficulty": "easy", "seed": 10000, "profile": "standard"},
+    "dev_easy": {"difficulty": "easy", "seed": 20000, "profile": "standard"},
+    "heldout_easy": {"difficulty": "easy", "seed": 30000, "profile": "standard"},
+    "train_medium": {"difficulty": "medium", "seed": 40000, "profile": "standard"},
+    "dev_medium": {"difficulty": "medium", "seed": 50000, "profile": "standard"},
+    "heldout_medium": {"difficulty": "medium", "seed": 60000, "profile": "standard"},
+    "heldout_generalization": {"difficulty": "medium", "seed": 90000, "profile": "generalization"},
+}
+
+PROMPT_VARIANTS = ("default", "brief", "ticket", "stakeholder")
 
 
 DIFFICULTY_PRESETS = {
@@ -104,9 +148,25 @@ def local_minutes(utc_minute: int, tz_offset: int) -> int:
     return (utc_minute + tz_offset) % (24 * 60)
 
 
-def format_block(block: dict[str, Any], tz_offset: int = 0) -> dict[str, Any]:
+def display_day(problem: dict[str, Any], internal_day: int) -> int:
+    day_labels = problem.get("day_labels")
+    if day_labels:
+        return int(day_labels[internal_day])
+    return internal_day
+
+
+def internal_day(problem: dict[str, Any], submitted_day: int) -> int:
+    day_labels = [int(day) for day in problem.get("day_labels", [])]
+    if submitted_day in day_labels:
+        return day_labels.index(submitted_day)
+    if not day_labels and 0 <= submitted_day < int(problem["days"]):
+        return submitted_day
+    raise ValueError(f"day must be one of {day_labels or list(range(int(problem['days'])))}")
+
+
+def format_block(block: dict[str, Any], tz_offset: int = 0, problem: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
-        "day": block["day"],
+        "day": display_day(problem, int(block["day"])) if problem else block["day"],
         "start": minutes_to_time(local_minutes(int(block["start"]), tz_offset)),
         "end": minutes_to_time(local_minutes(int(block["end"]), tz_offset)),
     }
@@ -137,7 +197,7 @@ def attendee_utility(attendee: dict[str, Any], day: int, start: int, end: int, i
 
 
 def score_choice(problem: dict[str, Any], choice: dict[str, Any]) -> dict[str, Any]:
-    day = int(choice["day"])
+    day = internal_day(problem, int(choice["day"]))
     start = time_to_minutes(choice["start_time"]) if isinstance(choice["start_time"], str) else int(choice["start_time"])
     duration = int(problem["meeting_duration"])
     end = start + duration
@@ -202,7 +262,7 @@ def enumerate_choices(problem: dict[str, Any]) -> list[dict[str, Any]]:
                 for attendees in subsets:
                     choices.append(
                         {
-                            "day": day,
+                            "day": display_day(problem, day),
                             "start_time": minutes_to_time(start),
                             "room": room["name"],
                             "attendees": attendees,
@@ -239,34 +299,38 @@ def random_block(rng: random.Random, day_count: int, min_start: int, max_end: in
     return {"day": rng.randrange(day_count), "start": start, "end": end}
 
 
-def sample_attendee_names(rng: random.Random, count: int) -> list[str]:
-    names = list(NAMES)
+def sample_attendee_names(rng: random.Random, count: int, profile: str) -> list[str]:
+    names = list(GENERALIZATION_NAMES if profile == "generalization" else NAMES)
     rng.shuffle(names)
     return names[:count]
 
 
-def sample_room_names(seed: int, attempt: int, count: int) -> list[str]:
-    names = list(ROOM_NAMES)
+def sample_room_names(seed: int, attempt: int, count: int, profile: str) -> list[str]:
+    names = list(GENERALIZATION_ROOM_NAMES if profile == "generalization" else ROOM_NAMES)
     random.Random(seed * 9176 + attempt).shuffle(names)
     return names[:count]
 
 
-def build_problem(seed: int, difficulty: str) -> dict[str, Any]:
+def build_problem(seed: int, difficulty: str, profile: str = "standard") -> dict[str, Any]:
     preset = DIFFICULTY_PRESETS[difficulty]
+    if profile not in {"standard", "generalization"}:
+        raise ValueError("profile must be 'standard' or 'generalization'")
     for attempt in range(600):
         local_rng = random.Random(seed * 1009 + attempt)
         attendee_count = local_rng.randint(*preset["attendees"])
         optional_count = min(local_rng.randint(*preset["optional"]), attendee_count - 2)
         day_count = local_rng.randint(*preset["days"])
+        day_start = local_rng.randint(1, 31 - day_count)
+        day_labels = list(range(day_start, day_start + day_count))
         duration = local_rng.choice([30, 60, 60, 90])
         room_count = local_rng.randint(*preset["rooms"])
-        room_names = sample_room_names(seed, attempt, room_count)
+        room_names = sample_room_names(seed, attempt, room_count, profile)
 
         weights = [local_rng.uniform(0.7, 1.8) for _ in range(attendee_count)]
         weight_total = sum(weights)
         attendees = []
-        tz_items = list(TIME_ZONES.items())
-        attendee_names = sample_attendee_names(local_rng, attendee_count)
+        tz_items = list((GENERALIZATION_TIME_ZONES if profile == "generalization" else TIME_ZONES).items())
+        attendee_names = sample_attendee_names(local_rng, attendee_count, profile)
         for index, name in enumerate(attendee_names):
             city, offset = local_rng.choice(tz_items)
             hard_start = local_rng.choice([7 * 60, 8 * 60, 9 * 60])
@@ -312,7 +376,9 @@ def build_problem(seed: int, difficulty: str) -> dict[str, Any]:
         problem = {
             "problem_id": f"calendar-{difficulty}-{seed}-{attempt}",
             "difficulty": difficulty,
+            "generation_profile": profile,
             "days": day_count,
+            "day_labels": day_labels,
             "meeting_duration": duration,
             "workday_start": UTC_DAY_START,
             "workday_end": 17 * 60,
@@ -328,28 +394,121 @@ def build_problem(seed: int, difficulty: str) -> dict[str, Any]:
     return problem
 
 
-def public_summary(problem: dict[str, Any]) -> str:
+def slice_tags(problem: dict[str, Any], prompt_variant: str = "default", split: str | None = None) -> dict[str, Any]:
+    optional_count = sum(1 for attendee in problem["attendees"] if not attendee["required"])
+    required_count = len(problem["attendees"]) - optional_count
+    timezone_offsets = [int(attendee["tz_offset"]) for attendee in problem["attendees"]]
+    timezone_span_hours = round((max(timezone_offsets) - min(timezone_offsets)) / 60, 1) if timezone_offsets else 0.0
+    valid_ratio = float(problem["valid_ratio"])
+    best_start = time_to_minutes(problem["best_choice"]["start_time"]) if problem.get("best_choice") else 0
+    if valid_ratio < 0.04:
+        density_bucket = "low"
+    elif valid_ratio < 0.10:
+        density_bucket = "medium"
+    else:
+        density_bucket = "high"
+    if best_start < 12 * 60:
+        best_start_bucket = "morning"
+    elif best_start < 15 * 60:
+        best_start_bucket = "midday"
+    else:
+        best_start_bucket = "late"
+    return {
+        "split": split or "custom",
+        "difficulty": problem["difficulty"],
+        "generation_profile": problem.get("generation_profile", "standard"),
+        "prompt_variant": prompt_variant,
+        "attendee_count": len(problem["attendees"]),
+        "required_count": required_count,
+        "optional_count": optional_count,
+        "room_count": len(problem["rooms"]),
+        "day_count": int(problem["days"]),
+        "day_start": int(problem.get("day_labels", [0])[0]),
+        "day_end": int(problem.get("day_labels", [int(problem["days"]) - 1])[-1]),
+        "duration_minutes": int(problem["meeting_duration"]),
+        "timezone_span_hours": timezone_span_hours,
+        "valid_ratio": valid_ratio,
+        "valid_density_bucket": density_bucket,
+        "best_start_bucket": best_start_bucket,
+        "best_score": float(problem["best_score"]),
+    }
+
+
+def select_prompt_variant(seed: int, index: int, prompt_variant: str) -> str:
+    if prompt_variant == "mixed":
+        return PROMPT_VARIANTS[(seed + index) % len(PROMPT_VARIANTS)]
+    if prompt_variant not in PROMPT_VARIANTS:
+        raise ValueError(f"prompt_variant must be 'mixed' or one of {PROMPT_VARIANTS}")
+    return prompt_variant
+
+
+def public_summary(problem: dict[str, Any], variant: str = "default") -> str:
     required = [att["name"] for att in problem["attendees"] if att["required"]]
     optional = [att["name"] for att in problem["attendees"] if not att["required"]]
     room_names = ", ".join(room["name"] for room in problem["rooms"])
+    duration = problem["meeting_duration"]
+    day_labels = [int(day) for day in problem.get("day_labels", list(range(int(problem["days"]))))]
+    days = f"{day_labels[0]}-{day_labels[-1]}" if len(day_labels) > 1 else str(day_labels[0])
+    window = f"{minutes_to_time(problem['workday_start'])}-{minutes_to_time(problem['workday_end'])} UTC"
+    if variant == "brief":
+        return (
+            f"Find the best feasible slot for a {duration}-minute meeting. Days: {days}. "
+            f"Starts must be every 30 minutes in the global window {window}. Must include: {', '.join(required)}. "
+            f"Include optional people when useful: {', '.join(optional) or 'none'}. Rooms to consider: {room_names}. "
+            "Inspect calendars, constraints, and rooms with tools; submit the chosen window."
+        )
+    if variant == "ticket":
+        return (
+            "Scheduling ticket:\n"
+            f"- Meeting length: {duration} minutes\n"
+            f"- Candidate days: {days}\n"
+            f"- Allowed UTC start window: {window}, 30-minute increments\n"
+            f"- Required participants: {', '.join(required)}\n"
+            f"- Nice-to-have participants: {', '.join(optional) or 'none'}\n"
+            f"- Rooms: {room_names}\n"
+            "Resolve the ticket by using the available tools and submitting one final meeting window."
+        )
+    if variant == "stakeholder":
+        optional_clause = f"Try to include {', '.join(optional)} if the tradeoff is worthwhile. " if optional else ""
+        return (
+            f"A team needs one {duration}-minute meeting sometime on days {days}. "
+            f"The global scheduling window is {window}, with starts only on half-hour marks. "
+            f"The meeting cannot happen without {', '.join(required)}. "
+            f"{optional_clause}"
+            f"Candidate rooms are {room_names}. Use the tools to discover hidden calendars/preferences and submit one window."
+        )
     return (
-        f"Schedule a {problem['meeting_duration']}-minute meeting within days 0-{problem['days'] - 1}. "
-        f"Use 30-minute start increments between {minutes_to_time(problem['workday_start'])} and "
-        f"{minutes_to_time(problem['workday_end'])} UTC. Required attendees: {', '.join(required)}. "
+        f"Schedule a {duration}-minute meeting within days {days}. "
+        f"Use 30-minute start increments between {window}. Required attendees: {', '.join(required)}. "
         f"Optional desired attendees: {', '.join(optional) or 'none'}. Available rooms: {room_names}. "
         "Use the tools to inspect calendars and constraints, then submit one meeting window."
     )
 
 
-def build_dataset(num_examples: int, difficulty: str, seed: int, max_turns: int) -> Dataset:
+def build_dataset(
+    num_examples: int,
+    difficulty: str,
+    seed: int,
+    max_turns: int,
+    split: str | None = None,
+    profile: str = "standard",
+    prompt_variant: str = "default",
+) -> Dataset:
     rows = []
     for index in range(num_examples):
-        problem = build_problem(seed + index, difficulty)
+        problem = build_problem(seed + index, difficulty, profile=profile)
         problem["max_turns"] = max_turns
+        variant = select_prompt_variant(seed, index, prompt_variant)
+        tags = slice_tags(problem, prompt_variant=variant, split=split)
+        problem["slice_tags"] = tags
         rows.append(
             {
                 "example_id": index,
-                "question": public_summary(problem),
+                "split": split or "custom",
+                "generation_profile": profile,
+                "prompt_variant": variant,
+                "task_slices": json.dumps(tags, sort_keys=True),
+                "question": public_summary(problem, variant=variant),
                 "answer": json.dumps(
                     {
                         "best_choice": problem["best_choice"],
@@ -392,12 +551,63 @@ def found_acceptable(state: vf.State) -> float:
     return float(isinstance(submitted, dict) and bool(submitted.get("acceptable")))
 
 
+def exact_optimal(state: vf.State) -> float:
+    return float(normalized_score(state) >= 0.999)
+
+
+def submitted_any(state: vf.State) -> float:
+    return float(isinstance(state.get("submitted_result"), dict))
+
+
+def invalid_submission(state: vf.State) -> float:
+    submitted = state.get("submitted_result")
+    return float(isinstance(submitted, dict) and not bool(submitted.get("acceptable")))
+
+
+def task_attendee_count(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["attendee_count"])
+
+
+def task_optional_count(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["optional_count"])
+
+
+def task_room_count(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["room_count"])
+
+
+def task_valid_ratio(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["valid_ratio"])
+
+
+def task_timezone_span_hours(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["timezone_span_hours"])
+
+
+def slice_low_valid_density(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["valid_density_bucket"] == "low")
+
+
+def slice_late_optimum(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["best_start_bucket"] == "late")
+
+
 class CalendarSchedulingEnv(vf.StatefulToolEnv):
     def __init__(self, dataset: Dataset, max_turns: int):
         rubric = vf.Rubric(funcs=[normalized_score], weights=[1.0])
         rubric.add_metric(calendar_reward)
         rubric.add_metric(optimum_gap)
         rubric.add_metric(found_acceptable)
+        rubric.add_metric(exact_optimal)
+        rubric.add_metric(submitted_any)
+        rubric.add_metric(invalid_submission)
+        rubric.add_metric(task_attendee_count)
+        rubric.add_metric(task_optional_count)
+        rubric.add_metric(task_room_count)
+        rubric.add_metric(task_valid_ratio)
+        rubric.add_metric(task_timezone_span_hours)
+        rubric.add_metric(slice_low_valid_density)
+        rubric.add_metric(slice_late_optimum)
         super().__init__(
             dataset=dataset,
             rubric=rubric,
@@ -451,8 +661,8 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                 "city": person["city"],
                 "timezone_offset_minutes": person["tz_offset"],
                 "submission_timezone": "UTC",
-                "busy_blocks_utc": [format_block(block) for block in person["busy"]],
-                "busy_blocks_local": [format_block(block, person["tz_offset"]) for block in person["busy"]],
+                "busy_blocks_utc": [format_block(block, problem=problem) for block in person["busy"]],
+                "busy_blocks_local": [format_block(block, person["tz_offset"], problem=problem) for block in person["busy"]],
                 "remaining_turns": self._remaining_turns(state),
             },
             indent=2,
@@ -494,7 +704,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                     },
                     "soft_costs": {
                         "back_to_back": person["back_to_back_cost"],
-                        "bad_days": person["bad_days"],
+                        "bad_days": [display_day(problem, int(day)) for day in person["bad_days"]],
                         "bad_day_cost": person["bad_day_cost"],
                         "optional_omission_utility": person["omit_utility"] if not person["required"] else None,
                     },
@@ -517,7 +727,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                     {
                         "name": item["name"],
                         "capacity": item["capacity"],
-                        "busy_blocks_utc": [format_block(block) for block in item["busy"]],
+                        "busy_blocks_utc": [format_block(block, problem=problem) for block in item["busy"]],
                     }
                     for item in rooms
                 ],
@@ -580,13 +790,31 @@ def load_environment(
     num_examples: int = 25,
     seed: int = 7,
     max_turns: int | None = None,
+    split: str | None = None,
+    generation_profile: str = "standard",
+    prompt_variant: str = "default",
     **kwargs: Any,
 ) -> vf.Environment:
     """Load the calendar scheduling environment."""
+    if split is not None:
+        if split not in SPLIT_PRESETS:
+            raise ValueError(f"split must be one of {sorted(SPLIT_PRESETS)}")
+        preset = SPLIT_PRESETS[split]
+        difficulty = str(preset["difficulty"])
+        seed = int(preset["seed"])
+        generation_profile = str(preset["profile"])
     if difficulty not in DIFFICULTY_PRESETS:
         raise ValueError(f"difficulty must be one of {sorted(DIFFICULTY_PRESETS)}")
     resolved_max_turns = max_turns or int(DIFFICULTY_PRESETS[difficulty]["max_turns"])
-    dataset = build_dataset(num_examples=num_examples, difficulty=difficulty, seed=seed, max_turns=resolved_max_turns)
+    dataset = build_dataset(
+        num_examples=num_examples,
+        difficulty=difficulty,
+        seed=seed,
+        max_turns=resolved_max_turns,
+        split=split,
+        profile=generation_profile,
+        prompt_variant=prompt_variant,
+    )
     return CalendarSchedulingEnv(dataset=dataset, max_turns=resolved_max_turns)
 
 

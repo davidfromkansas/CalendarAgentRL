@@ -9,5 +9,5 @@ num_examples = 100
 rollouts_per_example = 1
 max_tokens = 2048
 temperature = 0.2
-state_columns = ["submitted_choice", "submitted_result"]
-env_args = { difficulty = "easy", num_examples = 100, seed = 30000, max_turns = 10 }
+state_columns = ["task_slices", "prompt_variant", "generation_profile", "submitted_choice", "submitted_result"]
+env_args = { split = "heldout_easy", num_examples = 100, max_turns = 10, prompt_variant = "mixed" }

@@ -91,3 +91,8 @@ Generation samples candidate problems and filters by exact enumeration. This kee
 - Completed: Started Hosted Training run `af9nqyslfd2mqq9pdk883nrf`; logs confirmed the orchestrator pulled and installed `davidfromkansas/calendar-agent@0.1.0`, and status was `RUNNING`.
 - Observed: Run `af9nqyslfd2mqq9pdk883nrf` was automatically stopped when wallet balance was exhausted.
 - Completed: After wallet balance was restored, launched fresh Hosted Training run `smtsimdsia3lgfuplt2sskzc`; status was `RUNNING` and logs confirmed the orchestrator installed `davidfromkansas/calendar-agent@0.1.0`.
+- Completed: Added named split presets for train/dev/heldout evals, including `heldout_generalization` with heldout names, rooms, and time zones.
+- Completed: Added deterministic prompt variants (`default`, `brief`, `ticket`, `stakeholder`, and `mixed`) so final evals can test prompt robustness without model-generated prompt randomness.
+- Completed: Added per-task slice metadata in `task_slices` plus aggregate rubric metrics for task shape, valid-solution density, submission behavior, invalid submissions, and exact optimality.
+- Completed: Updated eval and budget training configs to use split presets and mixed prompt variants.
+- TODO: Add an offline report script that groups uploaded/local eval results by `task_slices` and computes confidence intervals for before/after model comparisons.
