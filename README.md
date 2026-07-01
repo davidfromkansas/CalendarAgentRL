@@ -125,9 +125,9 @@ Difficulty controls ranges for:
 
 | Split preset | Purpose |
 | --- | --- |
-| `train_easy` / `train_medium` | Training-only seeds. |
-| `dev_easy` / `dev_medium` | Repeated debugging and recipe-selection evals. |
-| `heldout_easy` / `heldout_medium` | Final standard-distribution evals. |
+| `train_easy` / `train_medium` / `train_hard` | Training-only seeds. |
+| `dev_easy` / `dev_medium` / `dev_hard` | Repeated debugging and recipe-selection evals. |
+| `heldout_easy` / `heldout_medium` / `heldout_hard` | Final standard-distribution evals. |
 | `heldout_generalization` | Final generalization eval with heldout names, rooms, and time zones. |
 
 For robust evals, use `prompt_variant="mixed"`. The environment renders equivalent public task prompts in several deterministic styles, including a compact brief, a ticket format, and a stakeholder-style request. The hidden calendars and scoring are still generated entirely by code.
@@ -138,7 +138,11 @@ Each task also exposes slice metadata in the dataset column `task_slices`, and t
 - `task_optional_count`
 - `task_room_count`
 - `task_valid_ratio`
+- `task_random_baseline_score`
+- `task_near_optimal_count`
 - `task_timezone_span_hours`
+- `score_checks_used`
+- `score_checks_remaining`
 - `slice_low_valid_density`
 - `slice_late_optimum`
 - `submitted_any`

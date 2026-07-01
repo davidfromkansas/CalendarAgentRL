@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import json
 
-from calendar_agent import build_problem, calendar_reward, load_environment, normalized_score, public_summary, score_choice
+from calendar_agent import (
+    build_problem,
+    calendar_reward,
+    load_environment,
+    normalized_score,
+    public_summary,
+    score_choice,
+)
 
 
 def test_generated_problems_are_solvable() -> None:
@@ -60,6 +67,16 @@ def test_heldout_generalization_uses_distinct_surface_data() -> None:
         assert all(room["name"] not in {"Atlas", "Borealis", "Cascade"} for room in problem["rooms"])
 
 
+def test_hard_split_presets_are_available() -> None:
+    for split in ["train_hard", "dev_hard", "heldout_hard"]:
+        env = load_environment(split=split, num_examples=1)
+        row = env.get_dataset()[0]
+        problem = row["info"]["problem"]
+        assert row["split"] == split
+        assert problem["difficulty"] == "hard"
+        assert problem["score_check_budget"] == 4
+
+
 def test_task_slice_columns_are_available() -> None:
     env = load_environment(difficulty="medium", num_examples=1, seed=500, prompt_variant="ticket")
     row = env.get_dataset()[0]
@@ -68,6 +85,28 @@ def test_task_slice_columns_are_available() -> None:
     assert slices["difficulty"] == "medium"
     assert slices["attendee_count"] >= slices["required_count"]
     assert slices["valid_density_bucket"] in {"low", "medium", "high"}
+    assert slices["random_baseline_score"] <= 0.25
+    assert slices["near_optimal_count"] <= 8
+
+
+def test_score_check_budget_is_enforced() -> None:
+    env = load_environment(difficulty="easy", num_examples=1, seed=7)
+    problem = env.get_dataset()[0]["info"]["problem"]
+    state = {"info": {"problem": problem}, "trajectory": []}
+    choice = problem["best_choice"]
+
+    for expected_remaining in range(problem["score_check_budget"] - 1, -1, -1):
+        result = json.loads(env.check_score(state=state, **choice))
+        assert result["score_checks_remaining"] == expected_remaining
+        assert "error" not in result
+
+    exhausted = json.loads(env.check_score(state=state, **choice))
+    assert exhausted["score_checks_remaining"] == 0
+    assert "budget exhausted" in exhausted["error"]
+
+    submitted = json.loads(env.submit_window(state=state, **choice))
+    assert submitted["acceptable"] is True
+    assert submitted["score_checks_remaining"] == 0
 
 
 def test_environment_loads_and_hides_state_argument() -> None:
@@ -95,7 +134,9 @@ if __name__ == "__main__":
     test_room_order_varies_by_generated_task()
     test_visible_days_are_month_style_labels()
     test_heldout_generalization_uses_distinct_surface_data()
+    test_hard_split_presets_are_available()
     test_task_slice_columns_are_available()
+    test_score_check_budget_is_enforced()
     test_environment_loads_and_hides_state_argument()
     test_training_reward_is_normalized_score()
     print("calendar-agent tests passed")

@@ -61,7 +61,7 @@ python calendar_tui.py --difficulty medium --seed 7
 | `num_examples` | int | `25` | Number of generated examples in the dataset. |
 | `seed` | int | `7` | Base deterministic seed. |
 | `max_turns` | int or null | preset-specific | Maximum model turns before the rollout ends. |
-| `split` | str or null | null | Optional named split preset such as `train_easy`, `dev_easy`, `heldout_easy`, `train_medium`, `dev_medium`, `heldout_medium`, or `heldout_generalization`. Split presets override `difficulty`, `seed`, and generation profile. |
+| `split` | str or null | null | Optional named split preset such as `train_easy`, `dev_easy`, `heldout_easy`, `train_medium`, `dev_medium`, `heldout_medium`, `train_hard`, `dev_hard`, `heldout_hard`, or `heldout_generalization`. Split presets override `difficulty`, `seed`, and generation profile. |
 | `generation_profile` | str | `"standard"` | `standard` or `generalization`. Usually set through `split`. |
 | `prompt_variant` | str | `"default"` | `default`, `brief`, `ticket`, `stakeholder`, or `mixed`. `mixed` deterministically rotates prompt templates across examples. |
 
@@ -77,12 +77,19 @@ python calendar_tui.py --difficulty medium --seed 7
 | `exact_optimal` | `1` when the submitted window reaches the oracle-normalized optimum. |
 | `submitted_any` | `1` when the agent called `submit_window`. |
 | `invalid_submission` | `1` when the agent submitted a hard-invalid window. |
+| `score_checks_used` | Number of candidate-scoring calls used by the agent. |
+| `score_checks_remaining` | Remaining `check_score` calls at the end of the rollout. |
+| `score_check_budget_exhausted` | `1` when the agent spent all available score checks. |
 | `task_attendee_count` | Average number of attendees in the evaluated tasks. |
 | `task_optional_count` | Average number of optional attendees in the evaluated tasks. |
 | `task_room_count` | Average number of rooms in the evaluated tasks. |
 | `task_valid_ratio` | Average share of candidate choices that are hard-feasible. |
+| `task_random_baseline_score` | Average score from blindly sampling across all candidate choices. Lower means random guessing is weak. |
+| `task_near_optimal_count` | Average number of candidates within the near-optimal band. Lower means fewer equally good answers. |
 | `task_timezone_span_hours` | Average attendee timezone spread. |
 | `slice_low_valid_density` | Share of tasks with low valid-solution density. |
 | `slice_late_optimum` | Share of tasks whose oracle starts in the late part of the workday. |
 
 The dataset also includes `task_slices`, `prompt_variant`, and `generation_profile` columns. Include them in `state_columns` for Prime eval runs when you want to inspect individual examples in the UI.
+
+The generator filters out tasks that are unsolvable, too easy to guess, or too ambiguous. Each difficulty controls the minimum valid candidate count, maximum random-baseline score, maximum near-optimal candidate count, and `check_score` budget. Current score-check budgets are easy = 8, medium = 6, and hard = 4.

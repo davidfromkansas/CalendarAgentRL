@@ -10,5 +10,5 @@ num_examples = 100
 rollouts_per_example = 1
 max_tokens = 2048
 temperature = 0.2
-state_columns = ["task_slices", "prompt_variant", "generation_profile", "submitted_choice", "submitted_result"]
+state_columns = ["task_slices", "prompt_variant", "generation_profile", "submitted_choice", "submitted_result", "score_checks_used", "score_checks_remaining"]
 env_args = { split = "heldout_generalization", num_examples = 100, max_turns = 14, prompt_variant = "mixed" }

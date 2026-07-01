@@ -1,5 +1,5 @@
-# Fixed dev eval for calendar-agent.
-# This must not overlap with RL training seeds.
+# Final hard heldout eval template.
+# Use after the easy and medium recipe is stable; hard tasks have fewer score checks.
 
 [[eval]]
 env_id = "davidfromkansas/calendar-agent"
@@ -10,4 +10,4 @@ rollouts_per_example = 1
 max_tokens = 2048
 temperature = 0.2
 state_columns = ["task_slices", "prompt_variant", "generation_profile", "submitted_choice", "submitted_result", "score_checks_used", "score_checks_remaining"]
-env_args = { split = "dev_easy", num_examples = 100, max_turns = 10, prompt_variant = "mixed" }
+env_args = { split = "heldout_hard", num_examples = 100, max_turns = 16, prompt_variant = "mixed" }

@@ -88,6 +88,9 @@ SPLIT_PRESETS = {
     "train_medium": {"difficulty": "medium", "seed": 40000, "profile": "standard"},
     "dev_medium": {"difficulty": "medium", "seed": 50000, "profile": "standard"},
     "heldout_medium": {"difficulty": "medium", "seed": 60000, "profile": "standard"},
+    "train_hard": {"difficulty": "hard", "seed": 70000, "profile": "standard"},
+    "dev_hard": {"difficulty": "hard", "seed": 80000, "profile": "standard"},
+    "heldout_hard": {"difficulty": "hard", "seed": 85000, "profile": "standard"},
     "heldout_generalization": {"difficulty": "medium", "seed": 90000, "profile": "generalization"},
 }
 
@@ -103,6 +106,11 @@ DIFFICULTY_PRESETS = {
         "rooms": (2, 3),
         "target_valid_ratio": (0.05, 0.28),
         "min_best_score": 0.72,
+        "min_valid_candidates": 5,
+        "max_random_baseline_score": 0.35,
+        "near_optimal_delta": 0.03,
+        "max_near_optimal_count": 12,
+        "score_check_budget": 8,
         "max_turns": 12,
     },
     "medium": {
@@ -113,6 +121,11 @@ DIFFICULTY_PRESETS = {
         "rooms": (2, 3),
         "target_valid_ratio": (0.02, 0.16),
         "min_best_score": 0.62,
+        "min_valid_candidates": 3,
+        "max_random_baseline_score": 0.25,
+        "near_optimal_delta": 0.025,
+        "max_near_optimal_count": 8,
+        "score_check_budget": 6,
         "max_turns": 14,
     },
     "hard": {
@@ -123,6 +136,11 @@ DIFFICULTY_PRESETS = {
         "rooms": (1, 2),
         "target_valid_ratio": (0.006, 0.08),
         "min_best_score": 0.50,
+        "min_valid_candidates": 1,
+        "max_random_baseline_score": 0.18,
+        "near_optimal_delta": 0.02,
+        "max_near_optimal_count": 6,
+        "score_check_budget": 4,
         "max_turns": 16,
     },
 }
@@ -271,25 +289,42 @@ def enumerate_choices(problem: dict[str, Any]) -> list[dict[str, Any]]:
     return choices
 
 
-def solve_problem(problem: dict[str, Any]) -> dict[str, Any]:
+def solve_problem(problem: dict[str, Any], near_optimal_delta: float = 0.0) -> dict[str, Any]:
     best_choice: dict[str, Any] | None = None
     best_result: dict[str, Any] | None = None
     valid_count = 0
+    scores = []
     all_choices = enumerate_choices(problem)
     for choice in all_choices:
         result = score_choice({**problem, "best_score": 0.0}, choice)
+        scores.append(float(result["score"]))
         if result["acceptable"]:
             valid_count += 1
         if best_result is None or result["score"] > best_result["score"]:
             best_choice = choice
             best_result = result
+    best_score = 0.0 if best_result is None else float(best_result["score"])
     return {
         "best_choice": best_choice,
-        "best_score": 0.0 if best_result is None else best_result["score"],
+        "best_score": best_score,
         "valid_count": valid_count,
         "candidate_count": len(all_choices),
         "valid_ratio": round(valid_count / max(len(all_choices), 1), 4),
+        "random_baseline_score": round(sum(scores) / max(len(scores), 1), 4),
+        "near_optimal_count": sum(1 for score in scores if score > 0 and score >= best_score - near_optimal_delta),
     }
+
+
+def task_quality_ok(solution: dict[str, Any], preset: dict[str, Any]) -> bool:
+    low, high = preset["target_valid_ratio"]
+    return bool(
+        solution["best_choice"]
+        and solution["best_score"] >= preset["min_best_score"]
+        and solution["valid_count"] >= preset["min_valid_candidates"]
+        and low <= solution["valid_ratio"] <= high
+        and solution["random_baseline_score"] <= preset["max_random_baseline_score"]
+        and solution["near_optimal_count"] <= preset["max_near_optimal_count"]
+    )
 
 
 def random_block(rng: random.Random, day_count: int, min_start: int, max_end: int) -> dict[str, Any]:
@@ -315,6 +350,8 @@ def build_problem(seed: int, difficulty: str, profile: str = "standard") -> dict
     preset = DIFFICULTY_PRESETS[difficulty]
     if profile not in {"standard", "generalization"}:
         raise ValueError("profile must be 'standard' or 'generalization'")
+    fallback: dict[str, Any] | None = None
+    fallback_quality: tuple[float, float] = (-1.0, -1.0)
     for attempt in range(600):
         local_rng = random.Random(seed * 1009 + attempt)
         attendee_count = local_rng.randint(*preset["attendees"])
@@ -384,12 +421,22 @@ def build_problem(seed: int, difficulty: str, profile: str = "standard") -> dict
             "workday_end": 17 * 60,
             "attendees": attendees,
             "rooms": rooms,
+            "score_check_budget": int(preset["score_check_budget"]),
         }
-        solution = solve_problem(problem)
-        low, high = preset["target_valid_ratio"]
-        if solution["best_choice"] and solution["best_score"] >= preset["min_best_score"] and low <= solution["valid_ratio"] <= high:
+        solution = solve_problem(problem, near_optimal_delta=float(preset["near_optimal_delta"]))
+        if solution["best_choice"]:
+            problem.update(solution)
+            low, high = preset["target_valid_ratio"]
+            valid_midpoint = (low + high) / 2
+            quality = (float(solution["best_score"]), -abs(float(solution["valid_ratio"]) - valid_midpoint))
+            if quality > fallback_quality:
+                fallback = deepcopy(problem)
+                fallback_quality = quality
+        if task_quality_ok(solution, preset):
             problem.update(solution)
             return problem
+    if fallback is not None:
+        return fallback
     problem.update(solution)
     return problem
 
@@ -428,6 +475,11 @@ def slice_tags(problem: dict[str, Any], prompt_variant: str = "default", split: 
         "duration_minutes": int(problem["meeting_duration"]),
         "timezone_span_hours": timezone_span_hours,
         "valid_ratio": valid_ratio,
+        "valid_count": int(problem["valid_count"]),
+        "candidate_count": int(problem["candidate_count"]),
+        "random_baseline_score": float(problem["random_baseline_score"]),
+        "near_optimal_count": int(problem["near_optimal_count"]),
+        "score_check_budget": int(problem["score_check_budget"]),
         "valid_density_bucket": density_bucket,
         "best_start_bucket": best_start_bucket,
         "best_score": float(problem["best_score"]),
@@ -514,6 +566,8 @@ def build_dataset(
                         "best_choice": problem["best_choice"],
                         "best_score": problem["best_score"],
                         "valid_ratio": problem["valid_ratio"],
+                        "random_baseline_score": problem["random_baseline_score"],
+                        "near_optimal_count": problem["near_optimal_count"],
                     },
                     sort_keys=True,
                 ),
@@ -564,6 +618,19 @@ def invalid_submission(state: vf.State) -> float:
     return float(isinstance(submitted, dict) and not bool(submitted.get("acceptable")))
 
 
+def score_checks_used(state: vf.State) -> float:
+    return float(state.get("score_checks_used", 0))
+
+
+def score_checks_remaining(state: vf.State) -> float:
+    problem = state["info"]["problem"]
+    return float(state.get("score_checks_remaining", problem.get("score_check_budget", 0)))
+
+
+def score_check_budget_exhausted(state: vf.State) -> float:
+    return float(score_checks_remaining(state) <= 0)
+
+
 def task_attendee_count(state: vf.State) -> float:
     return float(state["info"]["problem"]["slice_tags"]["attendee_count"])
 
@@ -578,6 +645,14 @@ def task_room_count(state: vf.State) -> float:
 
 def task_valid_ratio(state: vf.State) -> float:
     return float(state["info"]["problem"]["slice_tags"]["valid_ratio"])
+
+
+def task_random_baseline_score(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["random_baseline_score"])
+
+
+def task_near_optimal_count(state: vf.State) -> float:
+    return float(state["info"]["problem"]["slice_tags"]["near_optimal_count"])
 
 
 def task_timezone_span_hours(state: vf.State) -> float:
@@ -601,10 +676,15 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
         rubric.add_metric(exact_optimal)
         rubric.add_metric(submitted_any)
         rubric.add_metric(invalid_submission)
+        rubric.add_metric(score_checks_used)
+        rubric.add_metric(score_checks_remaining)
+        rubric.add_metric(score_check_budget_exhausted)
         rubric.add_metric(task_attendee_count)
         rubric.add_metric(task_optional_count)
         rubric.add_metric(task_room_count)
         rubric.add_metric(task_valid_ratio)
+        rubric.add_metric(task_random_baseline_score)
+        rubric.add_metric(task_near_optimal_count)
         rubric.add_metric(task_timezone_span_hours)
         rubric.add_metric(slice_low_valid_density)
         rubric.add_metric(slice_late_optimum)
@@ -616,7 +696,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                 "You are a careful calendar scheduling agent. Inspect the available calendars, "
                 "constraints, rooms, and score feedback with tools. Submit exactly one final "
                 "meeting window when you have a strong candidate. Keep reasoning concise: after "
-                "checking constraints, calendars, and rooms, use check_score on one or more "
+                "checking constraints, calendars, and rooms, use your limited check_score budget on "
                 "promising candidates and submit before the turn limit. All submitted start times "
                 "must be UTC. Attendee calendar tools provide UTC blocks; use those for conflict "
                 "checks. Never call submit_window unless check_score returned acceptable=true for "
@@ -649,12 +729,26 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
     def _problem(self, state: vf.State) -> dict[str, Any]:
         return state["info"]["problem"]
 
+    def _ensure_score_check_state(self, state: vf.State) -> None:
+        problem = self._problem(state)
+        budget = int(problem.get("score_check_budget", 0))
+        state.setdefault("score_checks_used", 0)
+        state.setdefault("score_checks_remaining", budget)
+
+    def _tool_budget_payload(self, state: vf.State) -> dict[str, Any]:
+        self._ensure_score_check_state(state)
+        return {
+            "remaining_turns": self._remaining_turns(state),
+            "score_checks_used": int(state["score_checks_used"]),
+            "score_checks_remaining": int(state["score_checks_remaining"]),
+        }
+
     def check_attendee_calendar(self, attendee: str, state: vf.State) -> str:
         """View one attendee's busy calendar blocks in UTC and their local time."""
         problem = self._problem(state)
         person = next((item for item in problem["attendees"] if item["name"].lower() == attendee.lower()), None)
         if person is None:
-            return json.dumps({"error": f"unknown attendee {attendee}", "remaining_turns": self._remaining_turns(state)})
+            return json.dumps({"error": f"unknown attendee {attendee}", **self._tool_budget_payload(state)})
         return json.dumps(
             {
                 "attendee": person["name"],
@@ -663,7 +757,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                 "submission_timezone": "UTC",
                 "busy_blocks_utc": [format_block(block, problem=problem) for block in person["busy"]],
                 "busy_blocks_local": [format_block(block, person["tz_offset"], problem=problem) for block in person["busy"]],
-                "remaining_turns": self._remaining_turns(state),
+                **self._tool_budget_payload(state),
             },
             indent=2,
         )
@@ -676,7 +770,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
         if attendee.lower() != "all":
             selected = [item for item in selected if item["name"].lower() == attendee.lower()]
         if not selected:
-            return json.dumps({"error": f"unknown attendee {attendee}", "remaining_turns": self._remaining_turns(state)})
+            return json.dumps({"error": f"unknown attendee {attendee}", **self._tool_budget_payload(state)})
         constraints = []
         for person in selected:
             constraints.append(
@@ -710,7 +804,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                     },
                 }
             )
-        return json.dumps({"constraints": constraints, "remaining_turns": self._remaining_turns(state)}, indent=2)
+        return json.dumps({"constraints": constraints, **self._tool_budget_payload(state)}, indent=2)
 
     def check_room_availability(self, room: str = "all", state: vf.State | None = None) -> str:
         """View busy blocks for one room or all rooms in UTC."""
@@ -720,7 +814,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
         if room.lower() != "all":
             rooms = [item for item in rooms if item["name"].lower() == room.lower()]
         if not rooms:
-            return json.dumps({"error": f"unknown room {room}", "remaining_turns": self._remaining_turns(state)})
+            return json.dumps({"error": f"unknown room {room}", **self._tool_budget_payload(state)})
         return json.dumps(
             {
                 "rooms": [
@@ -731,7 +825,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                     }
                     for item in rooms
                 ],
-                "remaining_turns": self._remaining_turns(state),
+                **self._tool_budget_payload(state),
             },
             indent=2,
         )
@@ -746,12 +840,23 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
     ) -> str:
         """Score a candidate meeting without submitting it."""
         assert state is not None
+        self._ensure_score_check_state(state)
+        if int(state["score_checks_remaining"]) <= 0:
+            return json.dumps(
+                {
+                    "error": "check_score budget exhausted; submit your best candidate with submit_window.",
+                    **self._tool_budget_payload(state),
+                },
+                indent=2,
+            )
         problem = self._problem(state)
         try:
             result = score_choice(problem, {"day": day, "start_time": start_time, "room": room, "attendees": attendees})
         except Exception as exc:
-            return json.dumps({"error": str(exc), "remaining_turns": self._remaining_turns(state)})
-        result["remaining_turns"] = self._remaining_turns(state)
+            return json.dumps({"error": str(exc), **self._tool_budget_payload(state)})
+        state["score_checks_used"] = int(state["score_checks_used"]) + 1
+        state["score_checks_remaining"] = max(0, int(state["score_checks_remaining"]) - 1)
+        result.update(self._tool_budget_payload(state))
         return json.dumps(result, indent=2)
 
     def submit_window(
@@ -771,6 +876,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
             result = {"acceptable": False, "score": 0.0, "violations": [str(exc)], "attendee_scores": []}
         state["submitted_result"] = result
         state["submitted_choice"] = {"day": day, "start_time": start_time, "room": room, "attendees": attendees}
+        self._ensure_score_check_state(state)
         state["final_env_response"] = [
             vf.UserMessage(
                 content=(
@@ -781,7 +887,7 @@ class CalendarSchedulingEnv(vf.StatefulToolEnv):
                 )
             )
         ]
-        result["remaining_turns"] = self._remaining_turns(state)
+        result.update(self._tool_budget_payload(state))
         return json.dumps(result, indent=2)
 
 
